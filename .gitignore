@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Flask/WSGI
+instance/
+.env
+*.env
+
+# SQLite database
+db.sqlite3
+
+# Uploads (user-generated media)
+static/uploads/
+
+# Virtual environments
+venv/
+.venv/
+
+# Logs
+*.log
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store

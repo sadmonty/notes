@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Заметки</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@editorjs/editorjs@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@editorjs/image@latest"></script>
+  <style>
+    body {
+      background-color: #f5f8fa;
+    }
+    .tag-badge {
+      background-color: #e1ecf4;
+      border-radius: 20px;
+      padding: 4px 10px;
+      margin: 2px;
+      display: inline-flex;
+      align-items: center;
+    }
+    .remove-tag {
+      margin-left: 6px;
+      cursor: pointer;
+      color: #888;
+      font-weight: bold;
+    }
+    #tag-suggestions .list-group-item {
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container my-4">
+    <div class="row">
+      <!-- Редактор + записи -->
+      <div class="col-lg-8 col-12 mb-4">
+        <div class="card mb-4">
+          <div class="card-body">
+            <h5 class="card-title">Новая запись</h5>
+            <input type="hidden" id="editingId">
+
+            <!-- Теги -->
+            <div id="selected-tags" class="mb-2 d-flex flex-wrap"></div>
+            <div class="input-group mb-2">
+              <input type="text" id="tag-input" class="form-control" placeholder="Введите тег..." autocomplete="off">
+              <button class="btn btn-outline-secondary" type="button" id="add-tag-button">＋</button>
+            </div>
+            <input type="hidden" id="tags">
+            <div id="tag-suggestions"></div>
+
+            <!-- Редактор -->
+            <div id="editorjs" class="border p-3 rounded bg-white"></div>
+            <button class="btn btn-primary mt-3 w-100 w-md-auto" onclick="save()">Сохранить</button>
+          </div>
+        </div>
+
+        <h5 class="mb-3">Сохранённые записи</h5>
+        {% for entry in entries %}
+        <div class="card mb-3">
+          <div class="card-body">
+            <div class="mb-2 text-muted small">{{ entry.created_at }}</div>
+            {% if entry.tags %}
+              <div class="mb-2"><strong>Теги:</strong> {{ entry.tags }}</div>
+            {% endif %}
+            {% for block in entry.blocks %}
+              {% if block.type == 'paragraph' %}
+                <p>{{ block.data.text | safe }}</p>
+              {% elif block.type == 'image' %}
+                <img src="{{ block.data.file.url }}" class="img-fluid rounded mb-2">
+              {% endif %}
+            {% endfor %}
+            <button class="btn btn-sm btn-outline-secondary" onclick="editEntry({{ loop.index0 }})">Редактировать</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Фильтры -->
+      <div class="col-lg-4 col-12">
+        <div class="card mb-3">
+          <div class="card-body">
+            <h6 class="card-title">Фильтр по тегам</h6>
+            {% if all_tags %}
+              <div class="d-flex flex-wrap">
+                {% for tag in all_tags %}
+                  <a href="/?tag={{ tag }}" class="btn btn-sm btn-outline-primary m-1 {% if tag == selected_tag %}active{% endif %}">{{ tag }}</a>
+                {% endfor %}
+                <a href="/?tag=_none" class="btn btn-sm btn-outline-secondary m-1 {% if selected_tag == '_none' %}active{% endif %}">Без тегов</a>
+              </div>
+              {% if selected_tag %}
+                <div class="mt-2">
+                  <a href="/" class="text-danger">Сбросить фильтр</a>
+                </div>
+              {% endif %}
+            {% else %}
+              <p class="text-muted">Нет доступных тегов.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Скрипты -->
+  <script>
+    let entries = {{ entries|tojson }};
+    const editor = new EditorJS({
+      holder: 'editorjs',
+      tools: {
+        image: {
+          class: ImageTool,
+          config: {
+            endpoints: {
+              byFile: '/upload'
+            }
+          }
+        }
+      }
+    });
+
+    async function save() {
+      const output = await editor.save();
+      const content = JSON.stringify(output);
+      const timestamp = document.getElementById('editingId').value || new Date().toLocaleString();
+      const tags = document.getElementById('tags').value.trim();
+
+      fetch('/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, timestamp, tags })
+      }).then(() => location.href = '/');
+    }
+
+    async function editEntry(index) {
+      const entry = entries[index];
+      document.getElementById('editingId').value = entry.created_at;
+      selectedTags = entry.tags ? entry.tags.split(',').map(t => t.trim()) : [];
+      renderTags();
+      await editor.isReady;
+      await editor.render({ time: Date.now(), blocks: entry.blocks });
+    }
+
+    const tagInput = document.getElementById('tag-input');
+    const addTagButton = document.getElementById('add-tag-button');
+    const tagHidden = document.getElementById('tags');
+    const selectedTagsContainer = document.getElementById('selected-tags');
+    const suggestionsBox = document.getElementById('tag-suggestions');
+    let selectedTags = [];
+    let allTags = [];
+
+    function addTag(tag) {
+      tag = tag.trim();
+      if (!tag || selectedTags.includes(tag)) return;
+      selectedTags.push(tag);
+      renderTags();
+    }
+
+    function removeTag(tag) {
+      selectedTags = selectedTags.filter(t => t !== tag);
+      renderTags();
+    }
+
+    function renderTags() {
+      selectedTagsContainer.innerHTML = '';
+      selectedTags.forEach(tag => {
+        const span = document.createElement('span');
+        span.className = 'tag-badge me-1';
+        span.innerHTML = `${tag}<span class="remove-tag" data-tag="${tag}">&times;</span>`;
+        selectedTagsContainer.appendChild(span);
+      });
+      tagHidden.value = selectedTags.join(', ');
+    }
+
+    selectedTagsContainer.addEventListener('click', e => {
+      if (e.target.classList.contains('remove-tag')) {
+        removeTag(e.target.dataset.tag);
+      }
+    });
+
+    function showTagSuggestions(filter = '') {
+      suggestionsBox.innerHTML = '';
+      const currentInput = filter.toLowerCase();
+      const filtered = filter
+        ? allTags.filter(tag => tag.toLowerCase().startsWith(currentInput) && !selectedTags.includes(tag))
+        : allTags.filter(tag => !selectedTags.includes(tag));
+      if (filtered.length === 0) return;
+      const list = document.createElement('div');
+      list.className = 'list-group';
+      filtered.forEach(tag => {
+        const item = document.createElement('button');
+        item.className = 'list-group-item list-group-item-action';
+        item.textContent = tag;
+        item.onclick = () => {
+          addTag(tag);
+          tagInput.value = '';
+          suggestionsBox.innerHTML = '';
+        };
+        list.appendChild(item);
+      });
+      suggestionsBox.appendChild(list);
+    }
+
+    tagInput.addEventListener('input', function () {
+      showTagSuggestions(this.value.trim());
+    });
+
+    tagInput.addEventListener('focus', function () {
+      showTagSuggestions('');
+    });
+
+    tagInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const newTag = this.value.trim();
+        if (newTag && !selectedTags.includes(newTag)) {
+          addTag(newTag);
+          this.value = '';
+          suggestionsBox.innerHTML = '';
+        }
+      }
+    });
+
+    addTagButton.addEventListener('click', () => {
+      const newTag = tagInput.value.trim();
+      if (newTag && !selectedTags.includes(newTag)) {
+        addTag(newTag);
+        tagInput.value = '';
+        suggestionsBox.innerHTML = '';
+      }
+    });
+
+    document.addEventListener('click', e => {
+      if (!suggestionsBox.contains(e.target) && e.target !== tagInput) {
+        suggestionsBox.innerHTML = '';
+      }
+    });
+
+    fetch('/tags')
+      .then(res => res.json())
+      .then(data => { allTags = data; });
+  </script>
+</body>
+</html>
